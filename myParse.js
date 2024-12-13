@@ -64,7 +64,7 @@ function myParse(json, reviver) {
     skipWhitespace();
     if (json[index] === "}") {
       index++; // Пропускаем закрывающую фигурную скобку }
-      return applyReviver(result);
+      return result;
     }
     while (true) {
       skipWhitespace();
@@ -83,7 +83,7 @@ function myParse(json, reviver) {
       if (json[index] !== ",") throw new SyntaxError('Expected ","');
       index++; // Пропускаем ,
     }
-    return applyReviver(result);
+    return result;
   }
 
   // Разбор массива
@@ -93,7 +93,7 @@ function myParse(json, reviver) {
     skipWhitespace();
     if (json[index] === "]") {
       index++; // Пропускаем закрывающую квадратную скобку ]
-      return applyReviver(result);
+      return result;
     }
     while (true) {
       skipWhitespace();
@@ -106,7 +106,7 @@ function myParse(json, reviver) {
       if (json[index] !== ",") throw new SyntaxError('Expected ","');
       index++; // Пропускаем ,
     }
-    return applyReviver(result);
+    return result;
   }
 
   // Разбор литералов (true, false, null)
@@ -138,38 +138,28 @@ function myParse(json, reviver) {
     while (/\s/.test(json[index])) index++;
   }
 
-  // Применение функции reviver
-  function applyReviver(obj) {
-    if (typeof reviver !== "function") return obj;
-
-    // Рекурсивное применение reviver к объектам
-    function recursiveRevive(holder) {
-      for (const key in holder) {
-        if (Object.hasOwn(holder, key)) {
-          const value = holder[key];
-          const newValue = reviver.call(holder, key, value);
+  function applyReviver(holder, key, value) {
+    if (typeof value === "object" && value !== null) {
+      for (const k in value) {
+        if (Object.hasOwn(value, k)) {
+          const newValue = applyReviver(value, k, value[k]);
           if (newValue === undefined) {
-            delete holder[key]; // Удаляем ключ, если reviver возвращает undefined
+            delete value[k]; // Удаляем ключ, если reviver возвращает undefined
           } else {
-            holder[key] = newValue;
-            if (typeof holder[key] === "object" && holder[key] !== null) {
-              recursiveRevive(holder[key]);
-            }
+            value[k] = newValue;
           }
         }
       }
     }
-
-    if (typeof obj === "object" && obj !== null) {
-      recursiveRevive({ "": obj });
-    }
-    return obj;
+    return typeof reviver === "function"
+      ? reviver.call(holder, key, value)
+      : value;
   }
 
   const result = parseValue();
   skipWhitespace();
   if (index < json.length) throw new SyntaxError("Unexpected extra characters");
-  return typeof reviver === "function" ? reviver("", result) : result;
+  return applyReviver({ "": result }, "", result);
 }
 
 // Тесты
@@ -223,5 +213,22 @@ assert.deepStrictEqual(
   myParse(json, (key, value) => (key === "age" ? undefined : value)),
   JSON.parse(json, (key, value) => (key === "age" ? undefined : value))
 );
+
+// Порядок применения reviver ко вложенным структурам
+let reviverOrderMyParse = [];
+let reviverOrderJSONParse = [];
+
+myParse('{"1": 1, "2": 2, "3": {"4": 4, "55": {"6": 6}}}', (key, value) => {
+  reviverOrderMyParse.push(key);
+  return value;
+});
+
+JSON.parse('{"1": 1, "2": 2, "3": {"4": 4, "55": {"6": 6}}}', (key, value) => {
+  reviverOrderJSONParse.push(key);
+  return value;
+});
+
+// Проверяем порядок вызовов
+assert.deepStrictEqual(reviverOrderMyParse, reviverOrderJSONParse);
 
 console.log("Все тесты пройдены успешно!");
